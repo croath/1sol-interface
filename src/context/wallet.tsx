@@ -158,10 +158,14 @@ export function WalletProvider({ children = null as any }) {
   const wallet = useMemo(
     function () {
       if (provider) {
-        return new (provider.adapter || Wallet)(
-          providerUrl,
-          endpoint
-        ) as WalletAdapter;
+        if (provider && providerUrl === 'https://solareum.app') {
+          return new (provider.adapter || Wallet)((window as any).solana, endpoint) as WalletAdapter
+        } else {
+          return new (provider.adapter || Wallet)(
+            providerUrl,
+            endpoint
+          ) as WalletAdapter;
+        }  
       }
     },
     [provider, providerUrl, endpoint]
