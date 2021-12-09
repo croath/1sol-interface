@@ -138,6 +138,9 @@ export const WALLET_PROVIDERS = [
   },
 ];
 
+const SOLAREUM_NAME = 'solareum'
+const SOLAREUM_URL = 'https://solareum.app'
+
 const WalletContext = React.createContext<any>(null);
 
 export function WalletProvider({ children = null as any }) {
@@ -146,8 +149,8 @@ export function WalletProvider({ children = null as any }) {
   const [autoConnect, setAutoConnect] = useState(false);
   const [providerUrl, setProviderUrl] = useLocalStorageState("walletProvider");
 
-  if ((window as any).solana?.platform === 'solareum') {
-    setProviderUrl('https://solareum.app')
+  if ((window as any).solana?.platform === SOLAREUM_NAME) {
+    setProviderUrl(SOLAREUM_URL)
   }
 
   const provider = useMemo(
@@ -158,14 +161,10 @@ export function WalletProvider({ children = null as any }) {
   const wallet = useMemo(
     function () {
       if (provider) {
-        if (provider && providerUrl === 'https://solareum.app') {
-          return new (provider.adapter || Wallet)((window as any).solana, endpoint) as WalletAdapter
-        } else {
-          return new (provider.adapter || Wallet)(
-            providerUrl,
-            endpoint
-          ) as WalletAdapter;
-        }  
+        return new (provider.adapter || Wallet)(
+          providerUrl === SOLAREUM_URL ? (window as any).solana: providerUrl,
+          endpoint
+        ) as WalletAdapter;
       }
     },
     [provider, providerUrl, endpoint]
@@ -220,7 +219,7 @@ export function WalletProvider({ children = null as any }) {
   }, [wallet]);
 
   useEffect(() => {
-    if (wallet && providerUrl === 'https://solareum.app') {
+    if (wallet && providerUrl === SOLAREUM_URL) {
       setAutoConnect(true);
     }
   }, [providerUrl, wallet]);
@@ -287,7 +286,7 @@ export function WalletProvider({ children = null as any }) {
                 />
               }
               style={{
-                display: "block",
+                display: provider.name === "Solareum" ? "none" : "block" ,
                 width: "100%",
                 textAlign: "left",
                 marginBottom: 8,
