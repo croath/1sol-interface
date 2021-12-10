@@ -21,6 +21,7 @@ import { useUserAccounts } from '../../utils/accounts'
 import { notify } from '../../utils/notifications'
 
 import './index.less'
+import { useLocation } from 'react-router'
 
 interface UserProps {
   id?: number,
@@ -37,16 +38,27 @@ interface UserProps {
   user_id?: number,
 }
 
+interface AuthInfo {
+  id: number,
+  hash: string,
+  auth_date: number,
+  username?: string,
+  first_name?: string,
+  last_name?: string,
+}
+
 const Airdrop = () => {
   const connection = useConnection();
   const { connected, connect, wallet } = useWallet()
   const { userAccounts, fetchUserTokenAccounts } = useUserAccounts();
+  const location = useLocation();
 
   const [auth, setAuth] = useState<{token: string, expireAt: string, uid: string} | null>()
 
   const [user, setUser] = useState<UserProps | null>()
 
   const [modal, setModal] = useState(false)
+  const [showLoginBtn, setShowLoginBtn] = useState(false)
 
   const [form] = Form.useForm()
 
@@ -61,33 +73,48 @@ const Airdrop = () => {
   const modalShowed = useRef(false)
 
   const fetchUserInfo = useCallback(async () => {
-    if (timer.current) {
-      clearTimeout(timer.current)
-    }
+    try {
+      if (timer.current) {
+        clearTimeout(timer.current)
+      }
 
-    const { data } = await axios.get('https://airdrop-api.1sol.io/api/users/self', {
-      headers: { Authorization: `Bearer ${auth?.token}` }
-    })
+      const { data } = await axios.get('https://airdrop-api.1sol.io/api/users/self', {
+        headers: { Authorization: `Bearer ${auth?.token}` }
+      })
 
-    setUser(data)
-    form.setFieldsValue({...data, email: data.email || '', token_acc_address: ''})
+      setUser(data)
+      setShowLoginBtn(false)
+      form.setFieldsValue({...data, email: data.email || '', token_acc_address: ''})
 
-    if (wallet && wallet.publicKey && data.wallet !== wallet.publicKey.toBase58() && !modalShowed.current) {
-      setModal(true)
-      modalShowed.current = true
-    }
+      if (wallet && wallet.publicKey && data.wallet !== wallet.publicKey.toBase58() && !modalShowed.current) {
+        setModal(true)
+        modalShowed.current = true
+      }
 
-    if (!data.channel || !data.in_group) {
-      timer.current = setTimeout(() => fetchUserInfo(), 3000)
+      if (!data.channel || !data.in_group) {
+        timer.current = setTimeout(() => fetchUserInfo(), 3000)
+      }
+    } catch (e) {
+      setShowLoginBtn(true)
     }
   }, [auth, form, wallet, modalShowed])
 
   useEffect(() => {
     if (connected && wallet && wallet.publicKey) {
-      const auth = localStorage.getItem(`airdrop:auth:info:${wallet.publicKey.toBase58()}`)
+      localStorage.setItem('airdrop_wallet', wallet.publicKey.toBase58())
 
-      if (auth) {
-        setAuth(JSON.parse(auth))
+      const authInfo = localStorage.getItem(`airdrop:auth:info:${wallet.publicKey.toBase58()}`)
+
+      if (authInfo) {
+        const auth = JSON.parse(authInfo)
+
+        setAuth(auth)
+
+        if (Number(auth.expireAt) * 1000 < Date.now()) {
+          setShowLoginBtn(true)
+        }
+      } else {
+        setShowLoginBtn(true)
       }
     }
   }, [connected, wallet])
@@ -141,7 +168,7 @@ const Airdrop = () => {
         fetchUserInfo()
 
         return
-      }
+      } 
 
       const callback = async (user: any) => {
         try {
@@ -181,7 +208,12 @@ const Airdrop = () => {
       script.setAttribute('data-telegram-login', 'OnesolMasterBot')
       script.setAttribute('data-size', 'large')
       script.setAttribute('data-request-access', 'write')
-      script.setAttribute('data-onauth', 'TelegramLoginWidget.dataOnauth(user)')
+      if (window.innerWidth < 768) {
+        script.setAttribute('data-auth-url', 'https://app.1sol.io/airdrop')
+      } else {
+        script.setAttribute('data-onauth', 'TelegramLoginWidget.dataOnauth(user)')
+      }
+
       script.async = true
 
       if (widget.current) {
@@ -194,8 +226,56 @@ const Airdrop = () => {
         }
       }
     },
-    [auth, fetchUserInfo, connected, setAuth, wallet, form]
+    [auth, fetchUserInfo, connected, setAuth, wallet, form, showLoginBtn]
   )
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(location.search);
+    const id = urlParams.get("id");
+    const authDate = urlParams.get("auth_date");
+    const firstName = urlParams.get("first_name");
+    const lastName = urlParams.get("last_name");
+    const hash = urlParams.get("hash") || "";
+    const username = urlParams.get("username");
+
+    const user: AuthInfo = {
+      id: Number(id),
+      auth_date: Number(authDate),
+      hash,
+    }
+
+    if (firstName) {
+      user.first_name = firstName
+    }
+
+    if (lastName) {
+      user.last_name = lastName
+    }
+
+    if (username) {
+      user.username = username
+    }
+
+    const wallet = localStorage.getItem('airdrop_wallet')
+
+    const callback = async (user: any) => {
+      try {
+        const { data: { token, exp: expireAt, user_id: uid } } = await axios.post(
+          'https://airdrop-api.1sol.io/login/auth/telegram',
+          user
+        )
+
+        setAuth({ token, expireAt, uid })
+        localStorage.setItem(`airdrop:auth:info:${wallet}`, JSON.stringify({ token, expireAt, uid }))
+      } catch (e) {
+        console.error(e)
+      }
+    }
+
+    if (user.id && user.auth_date && user.hash) {
+      callback(user)
+    }
+  } , [wallet, location.pathname, location.search])
 
   const handleOk = async () => {
     form.setFieldsValue({ 
@@ -248,14 +328,14 @@ const Airdrop = () => {
       <AppBar />
       <div className="bd">
         <Card
-          title="Airdrop Registration"
+          title={window.innerWidth < 768 ? "Airdrop Registration." : "Airdrop Registration"}
           className="airdrop-card"
           style={{ borderRadius: 20, margin: '20px auto 0', minHeight: '398px' }}
         >
           {connected ? (
             <>
               { 
-                !user ?
+                showLoginBtn ? 
                 <div className="airdrop-content">
                   <div ref={widget} />
                 </div> : 
